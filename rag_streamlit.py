@@ -65,21 +65,31 @@ def get_rag_context(query, _voyage_client, _pinecone_index):
         st.error(f"Error retrieving context: {str(e)}")
         return ""
 
-def get_assistant_response(prompt, context, claude_client):
-    """Get response from Claude"""
+def get_assistant_response(prompt, context, claude_client, message_history):
+    """Get response from Claude with conversation history"""
     try:
-        messages = [
-            {
-                "role": "user",
-                "content": f"{context}\n\nUser: {prompt}" if context else prompt
-            }
-        ]
+        # Prepare the full message history
+        messages = []
+        
+        # Add previous messages, excluding system messages
+        for msg in message_history:
+            if msg["role"] != "system":
+                messages.append({
+                    "role": msg["role"],
+                    "content": msg["content"]
+                })
+        
+        # Add current prompt with context
+        messages.append({
+            "role": "user",
+            "content": f"{context}\n\nUser: {prompt}" if context else prompt
+        })
         
         response = claude_client.messages.create(
             model="claude-3-5-sonnet-20241022",
             max_tokens=1000,
             messages=messages,
-            system="You are a helpful AI assistant with expertise in boardgame.io. Engage naturally with users, providing technical details only when specifically asked."
+            system="You are a helpful AI assistant with expertise in boardgame.io. Engage naturally with users, providing technical details only when specifically asked. Remember to keep track of the conversation context and refer back to previous questions when relevant."
         )
         return response.content
     except Exception as e:
@@ -114,8 +124,18 @@ def main():
         # Get assistant response
         with st.chat_message("assistant"):
             with st.spinner("Thinking..."):
+                # Get RAG context
                 context = get_rag_context(prompt, voyage, index)
-                response = get_assistant_response(prompt, context, claude)
+                
+                # Get response with full conversation history
+                response = get_assistant_response(
+                    prompt, 
+                    context, 
+                    claude, 
+                    st.session_state.messages[-10:]  # Keep last 10 messages to manage context window
+                )
+                
+                # Display and store response
                 st.markdown(format_response(response))
                 st.session_state.messages.append({"role": "assistant", "content": response})
 
