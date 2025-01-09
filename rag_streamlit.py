@@ -1,7 +1,7 @@
 import os
+import anthropic
 import voyageai
 from pinecone import Pinecone
-from anthropic import Client
 import streamlit as st
 
 # Set your API keys
@@ -10,66 +10,81 @@ CLAUDE_API_KEY = os.getenv("CLAUDE_API_KEY")
 PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
 PINECONE_ENV = os.getenv("PINECONE_ENV")
 
-# Initializations
+# Initialize clients
 voyage = voyageai.Client(api_key=VOYAGE_API_KEY)
 pc = Pinecone(api_key=PINECONE_API_KEY, environment=PINECONE_ENV)
 INDEX_NAME = "rag-index"
 index = pc.Index(INDEX_NAME)
-claude = Client(api_key=CLAUDE_API_KEY)
+
+# Anthropic client
+claude = anthropic.Client(api_key=CLAUDE_API_KEY)
 
 # Streamlit app setup
 st.set_page_config(page_title="RAG-Assisted Claude Chat", layout="wide")
 st.title("RAG-Assisted Claude Chat")
 st.markdown("A conversational AI powered by RAG-assisted Claude.")
 
-# Function to query Pinecone for relevant context
+# 1. Pinecone retrieval
 def retrieve_context(prompt):
     query_embedding = voyage.embed([prompt], model="voyage-3", input_type="query").embeddings[0]
     results = index.query(vector=query_embedding, top_k=5, include_metadata=True)
     return "\n\n".join([item["metadata"].get("content", "") for item in results["matches"]])
 
-# Function to fetch Claude's response
+# 2. Fetch Claude response via Anthropic Completions
 def fetch_claude_response(prompt, context, max_tokens=1000):
-    structured_prompt = f"Context:\n{context}\n\nQuestion:\n{prompt}\n\nAssistant:"
-    response = claude.messages.create(
-        model="claude-3-5-sonnet-20241022",
-        max_tokens=max_tokens,
-        system="You are an expert coder specialized in the boardgame.io library",  # Set the system prompt here
-        messages=[
-            {"role": "user", "content": structured_prompt}
-        ]
+    # Build a prompt with the recommended Anthropic approach
+    full_prompt = (
+        f"{anthropic.HUMAN_PROMPT} "
+        f"You are an expert coder specialized in the boardgame.io library.\n"
+        f"Context:\n{context}\n\n"
+        f"Question:\n{prompt}\n"
+        f"{anthropic.AI_PROMPT}"
     )
-    return response.content if hasattr(response, "content") else str(response)
+    
+    # Completions call
+    response = claude.completions.create(
+        prompt=full_prompt,
+        model="claude-3-5-sonnet-20241022",               # or whichever variant
+        max_tokens_to_sample=max_tokens,
+        temperature=0.7
+        # anthropic docs: https://github.com/anthropic/anthropic-sdk-python
+    )
+    
+    # Extract the text
+    raw_text = response["completion"]
+    
+    # Clean extraneous artifacts if any
+    clean_response = raw_text.replace("[TextBlock(text=", "").replace(", type='text')]", "").strip()
+    return clean_response
 
-# Main Streamlit app logic
+# 3. Streamlit session for conversation
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
-# Text input box with submit on "Enter"
 def submit_message():
-    if st.session_state["user_input"].strip():
-        user_message = st.session_state["user_input"].strip()
-        st.session_state.chat_history.append(("You", user_message))
-        st.session_state["user_input"] = ""  # Clear input box
+    user_input = st.session_state["user_input"].strip()
+    if user_input:
+        # Add to chat history
+        st.session_state.chat_history.append(("You", user_input))
+        st.session_state["user_input"] = ""
 
-        # Fetch response and update chat history
-        context = retrieve_context(user_message)
-        response = fetch_claude_response(user_message, context)
-        clean_response = response.replace("[TextBlock(text=", "").replace(", type='text')]", "").strip()
-        st.session_state.chat_history.append(("Claude", clean_response))
+        # Retrieve relevant context, then ask Claude
+        context = retrieve_context(user_input)
+        cl_reply = fetch_claude_response(user_input, context)
+        st.session_state.chat_history.append(("Claude", cl_reply))
 
-# Input field for user messages
-st.text_input(
-    "Type your message here:",
+# 4. Text input with Enter to submit, Shift+Enter for new line
+st.text_area(
+    "Type your message here (Enter = submit, Shift+Enter = new line):",
     key="user_input",
-    on_change=submit_message,  # Submit on "Enter"
-    placeholder="Enter your message and press Enter...",
+    on_change=submit_message,
+    placeholder="Enter your message...",
+    height=100
 )
 
-# Chat display
+# 5. Display chat history
 for speaker, message in st.session_state.chat_history:
-    if speaker == "Claude" and "```" in message:
-        st.markdown(f"**{speaker}:**")
-        st.code(message.replace("```", ""), language="python")
+    if speaker == "Claude":
+        st.markdown(f"**{speaker}:** {message}")
     else:
         st.markdown(f"**{speaker}:** {message}")
