@@ -59,7 +59,17 @@ def fetch_claude_response(prompt, context, max_tokens=1000):
         # Log the incoming request
         st.write("Debug: Preparing to send request to Claude")
         
-        structured_prompt = f"""Context:
+        # Determine if this is a meta-question about the system
+        meta_keywords = ["what library", "what framework", "what is this", "what are you", "embeddings", "trained on", "focused on"]
+        is_meta_question = any(keyword in prompt.lower() for keyword in meta_keywords)
+        
+        if is_meta_question:
+            structured_prompt = f"""Question:
+{prompt}
+
+Please provide a conversational response about the system itself. This is a meta-question about the chatbot, not a technical question requiring code examples."""
+        else:
+            structured_prompt = f"""Context:
 {context}
 
 Question:
@@ -73,7 +83,10 @@ Please provide a clear and concise response focusing on boardgame.io implementat
         response = claude.messages.create(
             model="claude-3-5-sonnet-20241022",
             max_tokens=max_tokens,
-            system="You are an expert coder specialized in the boardgame.io library. Provide specific, actionable advice and code examples when appropriate.",
+            system=("You are an AI assistant specialized in the boardgame.io library. "
+                   "For technical questions, provide specific code examples and implementation details. "
+                   "For questions about the system itself, respond conversationally without code examples. "
+                   "Always aim to give the most appropriate type of response for the question asked."),
             messages=[
                 {"role": "user", "content": structured_prompt}
             ]
