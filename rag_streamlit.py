@@ -40,7 +40,10 @@ def fetch_claude_response(prompt, context, max_tokens=1000):
             {"role": "user", "content": structured_prompt}
         ]
     )
-    return response["completion"]  # Extract the completion text
+    
+    # Extract the response content correctly based on the Message object
+    response_content = response.content if hasattr(response, "content") else str(response)
+    return response_content  # Streamlit automatically handles JSON and string outputs.
 
 # Main Streamlit app logic
 if "chat_history" not in st.session_state:
