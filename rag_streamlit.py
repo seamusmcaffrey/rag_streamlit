@@ -1,5 +1,4 @@
 import os
-import json
 import voyageai
 from pinecone import Pinecone
 from anthropic import Client
@@ -40,33 +39,37 @@ def fetch_claude_response(prompt, context, max_tokens=1000):
             {"role": "user", "content": structured_prompt}
         ]
     )
-    
-    # Extract the response content correctly based on the Message object
-    response_content = response.content if hasattr(response, "content") else str(response)
-    return response_content  # Streamlit automatically handles JSON and string outputs.
+    return response.content if hasattr(response, "content") else str(response)
 
 # Main Streamlit app logic
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
-# Input box
-user_input = st.text_area(
+if "raw_input" not in st.session_state:
+    st.session_state.raw_input = ""
+
+# Input box with submit on "Enter" and "Shift+Enter" for new line
+user_input = st.text_input(
     "Your Question:",
-    "",
-    key="user_input",
-    placeholder="Type your question here and press Enter or click Send.",
-    height=100,
-    on_change=lambda: st.session_state.update({"user_submitted": True}),
+    value=st.session_state.raw_input,
+    key="input_text",
+    on_change=lambda: st.session_state.update({"raw_input": st.session_state.input_text.strip()}),
 )
 
-if st.button("Send") or st.session_state.get("user_submitted", False):
-    st.session_state.user_submitted = False  # Reset the flag
+# Submit button logic
+if st.button("Send"):
     if user_input.strip():
+        # Retrieve context and fetch response
         context = retrieve_context(user_input)
         response = fetch_claude_response(user_input, context)
+
+        # Update chat history
         st.session_state.chat_history.append(("You", user_input.strip()))
         st.session_state.chat_history.append(("Claude", response))
-        st.session_state.user_input = ""  # Clear input field
+
+        # Clear user input
+        st.session_state.raw_input = ""
+        st.experimental_rerun()
 
 # Chat display
 for speaker, message in st.session_state.chat_history:
@@ -75,6 +78,3 @@ for speaker, message in st.session_state.chat_history:
         st.code(message.replace("```", ""), language="python")
     else:
         st.markdown(f"**{speaker}:** {message}")
-
-# Add spacing to separate the input field from chat history
-st.write("")
