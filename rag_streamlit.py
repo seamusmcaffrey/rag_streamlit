@@ -7,19 +7,32 @@ import logging
 import sys
 from datetime import datetime
 
-# Configure logging - but only on first run
+# Configure logging - but only for significant events
 if 'logger' not in st.session_state:
-    logging.basicConfig(
-        level=logging.DEBUG,
-        format='%(asctime)s - %(levelname)s - %(message)s',
-        handlers=[
-            logging.StreamHandler(sys.stdout),
-            logging.FileHandler(f'chatbot_debug_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log')
-        ]
-    )
-    st.session_state.logger = logging.getLogger(__name__)
+    log_file = f'chatbot_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log'
+    
+    # Create file handler with INFO level
+    file_handler = logging.FileHandler(log_file)
+    file_handler.setLevel(logging.INFO)
+    file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+    
+    # Create console handler with WARNING level to reduce noise
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setLevel(logging.WARNING)
+    console_handler.setFormatter(logging.Formatter('%(levelname)s: %(message)s'))
+    
+    # Configure logger
+    logger = logging.getLogger("chatbot")
+    logger.setLevel(logging.INFO)
+    logger.addHandler(file_handler)
+    logger.addHandler(console_handler)
+    
+    # Prevent duplicate logs
+    logger.propagate = False
+    
+    st.session_state.logger = logger
 
-logger = st.session_state.get('logger', logging.getLogger(__name__))
+logger = st.session_state.get('logger', logging.getLogger("chatbot"))
 
 # Initialize API clients - but only once
 @st.cache_resource
@@ -49,11 +62,15 @@ def init_clients():
 def get_rag_context(query, voyage_client, pinecone_index):
     """Get relevant context from RAG system"""
     try:
-        logger.debug(f"Getting RAG context for query: {query}")
+        # Only log once per unique query
+        cache_key = f"rag_query_{hash(query)}"
+        if cache_key not in st.session_state:
+            logger.info(f"New RAG query: {query[:100]}...")
+            st.session_state[cache_key] = True
+            
         embedding = voyage_client.embed([query], model="voyage-3", input_type="query").embeddings[0]
         results = pinecone_index.query(vector=embedding, top_k=3, include_metadata=True)
         context = "\n\n".join([match["metadata"].get("content", "") for match in results["matches"]])
-        logger.debug(f"Retrieved context length: {len(context)}")
         return context
     except Exception as e:
         logger.error(f"Error getting RAG context: {str(e)}")
@@ -62,7 +79,9 @@ def get_rag_context(query, voyage_client, pinecone_index):
 def get_assistant_response(prompt, context, claude_client):
     """Get response from Claude"""
     try:
-        logger.debug(f"Getting Claude response for prompt: {prompt}")
+        # Only log new conversations
+        if len(st.session_state.messages) == 0:
+            logger.info("Starting new conversation")
         
         messages = [
             {
