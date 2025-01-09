@@ -49,25 +49,24 @@ def fetch_claude_response(prompt, context, max_tokens=1000):
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
-# Input box with submit on "Enter" and "Shift+Enter" for new line
-st.markdown("""
-<style>
-textarea {
-    height: 5em !important;
-    resize: none !important;
-}
-</style>
-""", unsafe_allow_html=True)
+# Input box
+user_input = st.text_area(
+    "Your Question:",
+    "",
+    key="user_input",
+    placeholder="Type your question here and press Enter or click Send.",
+    height=100,
+    on_change=lambda: st.session_state.update({"user_submitted": True}),
+)
 
-user_input = st.text_input("Your Question:", "", key="input_text", on_change=lambda: st.session_state.chat_history.append(("You", st.session_state.input_text.strip())))
-
-
-if st.button("Send"):
-    if user_input:
+if st.button("Send") or st.session_state.get("user_submitted", False):
+    st.session_state.user_submitted = False  # Reset the flag
+    if user_input.strip():
         context = retrieve_context(user_input)
         response = fetch_claude_response(user_input, context)
+        st.session_state.chat_history.append(("You", user_input.strip()))
         st.session_state.chat_history.append(("Claude", response))
-        st.session_state.input_text = ""  # Clear input field
+        st.session_state.user_input = ""  # Clear input field
 
 # Chat display
 for speaker, message in st.session_state.chat_history:
@@ -77,5 +76,5 @@ for speaker, message in st.session_state.chat_history:
     else:
         st.markdown(f"**{speaker}:** {message}")
 
-# Scroll the chat history to the top
+# Add spacing to separate the input field from chat history
 st.write("")
