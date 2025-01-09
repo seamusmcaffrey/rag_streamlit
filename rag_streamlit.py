@@ -1,151 +1,167 @@
 import os
-import streamlit as st
-import anthropic
 import voyageai
 from pinecone import Pinecone
+from anthropic import Client
+import streamlit as st
+import json
 
-# -----------------------------------------------------------------------------
-# 1. Retrieve and store your API keys from the environment (or however you load them)
-# -----------------------------------------------------------------------------
-VOYAGE_API_KEY = os.getenv("VOYAGE_API_KEY", "")
-CLAUDE_API_KEY = os.getenv("CLAUDE_API_KEY", "")
-PINECONE_API_KEY = os.getenv("PINECONE_API_KEY", "")
-PINECONE_ENV = os.getenv("PINECONE_ENV", "")
+# Set your API keys
+VOYAGE_API_KEY = os.getenv("VOYAGE_API_KEY")
+CLAUDE_API_KEY = os.getenv("CLAUDE_API_KEY")
+PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
+PINECONE_ENV = os.getenv("PINECONE_ENV")
 
-if not VOYAGE_API_KEY or not CLAUDE_API_KEY or not PINECONE_API_KEY:
-    st.error("Missing one or more required API keys. Please set VOYAGE_API_KEY, CLAUDE_API_KEY, and PINECONE_API_KEY.")
-    st.stop()
-
-# -----------------------------------------------------------------------------
-# 2. Initialize Voyage and Pinecone clients
-# -----------------------------------------------------------------------------
+# Initializations
 voyage = voyageai.Client(api_key=VOYAGE_API_KEY)
 pc = Pinecone(api_key=PINECONE_API_KEY, environment=PINECONE_ENV)
 INDEX_NAME = "rag-index"
 index = pc.Index(INDEX_NAME)
+claude = Client(api_key=CLAUDE_API_KEY)
 
-# -----------------------------------------------------------------------------
-# 3. Initialize Anthropic client (messages-based)
-# -----------------------------------------------------------------------------
-claude = anthropic.Client(api_key=CLAUDE_API_KEY)
+def init_session_state():
+    """Initialize session state variables"""
+    if "chat_history" not in st.session_state:
+        st.session_state.chat_history = []
+    if "user_input" not in st.session_state:
+        st.session_state.user_input = ""
 
-# -----------------------------------------------------------------------------
-# 4. Streamlit page config
-# -----------------------------------------------------------------------------
-st.set_page_config(page_title="RAG-Assisted Claude Chat", layout="wide")
-st.title("RAG-Assisted Claude Chat")
-st.markdown("A conversational AI powered by RAG-assisted Claude.")
-
-# -----------------------------------------------------------------------------
-# 5. Context retrieval from Pinecone
-# -----------------------------------------------------------------------------
-def retrieve_context(query_text):
-    """
-    Takes the user's query, embeds it, and retrieves top_k matching docs.
-    Returns a string of relevant context combined.
-    """
+def retrieve_context(prompt):
+    """Query Pinecone for relevant context"""
     try:
-        query_embedding = voyage.embed([query_text], model="voyage-3", input_type="query").embeddings[0]
+        st.write("Debug: Starting context retrieval")
+        
+        # Get embeddings
+        st.write("Debug: Generating embeddings")
+        query_embedding = voyage.embed([prompt], model="voyage-3", input_type="query").embeddings[0]
+        st.write("Debug: Embeddings generated successfully")
+        
+        # Query Pinecone
+        st.write("Debug: Querying Pinecone")
         results = index.query(vector=query_embedding, top_k=5, include_metadata=True)
-        # Combine the 'content' fields from all matches
-        combined_context = "\n\n".join([match["metadata"].get("content", "") for match in results["matches"]])
-        return combined_context
+        st.write(f"Debug: Received {len(results['matches'])} matches from Pinecone")
+        
+        # Extract contexts
+        contexts = [item["metadata"].get("content", "") for item in results["matches"]]
+        st.write(f"Debug: Extracted {len(contexts)} context pieces")
+        
+        final_context = "\n\n".join(contexts)
+        st.write(f"Debug: Final context length: {len(final_context)} characters")
+        
+        return final_context
     except Exception as e:
-        st.warning(f"Error retrieving context from Pinecone: {e}")
+        st.error(f"Error retrieving context: {str(e)}")
+        st.write(f"Debug: Full error details: {repr(e)}")
         return ""
 
-# -----------------------------------------------------------------------------
-# 6. Function to call Claude (Anthropic messages-based API)
-# -----------------------------------------------------------------------------
-def fetch_claude_response(user_query, context, max_tokens=1000):
-    """
-    Uses Anthropic's Chat-based endpoint with the messages param.
-    Returns a string (Claude's completion).
-    """
+def fetch_claude_response(prompt, context, max_tokens=1000):
+    """Fetch response from Claude API"""
     try:
-        # Build your conversation as a list of messages
-        # We'll use a "system" role to set instructions for Claude,
-        # plus a "user" role to pass the combined RAG context + user question.
-        # For additional prompt engineering, refine these messages as you wish.
-        messages = [
-            {
-                "role": "system",
-                "content": (
-                    "You are an expert coder specialized in the boardgame.io library. "
-                    "Use the provided context to answer the user's question. If the "
-                    "context is insufficient, say you are unsure."
-                )
-            },
-            {
-                "role": "user",
-                "content": (
-                    f"Context:\n{context}\n\n"
-                    f"Question:\n{user_query}\n\n"
-                    "Please provide a helpful, code-focused answer where applicable."
-                )
-            }
-        ]
+        # Log the incoming request
+        st.write("Debug: Preparing to send request to Claude")
+        
+        structured_prompt = f"""Context:
+{context}
 
-        # Send the request to Anthropic
-        response = claude.chat.create(
-            model="claude-3-5-sonnet-20241022",           # or 'claude-instant-1' if needed
-            messages=messages,
-            max_tokens_to_sample=max_tokens,
-            temperature=0.7,
-            top_p=1
+Question:
+{prompt}
+
+Please provide a clear and concise response focusing on boardgame.io implementation details."""
+
+        # Log the structured prompt
+        st.write(f"Debug: Context length: {len(context)} characters")
+        
+        response = claude.messages.create(
+            model="claude-3-5-sonnet-20241022",
+            max_tokens=max_tokens,
+            system="You are an expert coder specialized in the boardgame.io library. Provide specific, actionable advice and code examples when appropriate.",
+            messages=[
+                {"role": "user", "content": structured_prompt}
+            ]
         )
-
-        # The actual text of Claude's reply is in response["completion"]
-        raw_reply = response["completion"]  # string
-        # Optionally remove weird artifacts if you have any
-        cleaned_reply = raw_reply.replace("[TextBlock(text=", "").replace(", type='text')]", "").strip()
-        return cleaned_reply
-
+        
+        # Log the raw response for debugging
+        st.write("Debug: Received response from Claude")
+        st.write(f"Debug: Response type: {type(response)}")
+        st.write(f"Debug: Response attributes: {dir(response)}")
+        
+        # Extract the content from the response
+        if hasattr(response, 'content'):
+            st.write(f"Debug: Content type: {type(response.content)}")
+            # Handle the case where content might be a list of content blocks
+            if isinstance(response.content, list):
+                content = "\n".join(str(block) for block in response.content)
+                st.write(f"Debug: Joined content from list: {len(content)} characters")
+                return content
+            st.write(f"Debug: Single content block: {len(str(response.content))} characters")
+            return str(response.content)
+        
+        st.write("Debug: No content attribute found in response")
+        return "I apologize, but I couldn't generate a response at this time."
+    
     except Exception as e:
-        st.error(f"Error calling Claude: {e}")
-        return "Sorry, there was an error."
+        st.error(f"Error getting Claude's response: {str(e)}")
+        return "I encountered an error while processing your request."
 
-# -----------------------------------------------------------------------------
-# 7. Setup Streamlit session to store chat history
-# -----------------------------------------------------------------------------
-if "chat_history" not in st.session_state:
-    st.session_state["chat_history"] = []
+def format_message(message):
+    """Format message for display, handling code blocks"""
+    if "```" in message:
+        parts = message.split("```")
+        formatted_parts = []
+        for i, part in enumerate(parts):
+            if i % 2 == 0:  # Regular text
+                if part.strip():
+                    formatted_parts.append(part)
+            else:  # Code block
+                language = "python" if part.startswith("python\n") else ""
+                code = part.replace("python\n", "") if language else part
+                st.code(code.strip(), language=language)
+        return " ".join(formatted_parts)
+    return message
 
-# -----------------------------------------------------------------------------
-# 8. Main user input + button
-# -----------------------------------------------------------------------------
-st.subheader("Ask a question about boardgame.io:")
-user_input = st.text_area("Your question here:", value="", height=100)
-
-if st.button("Submit"):
-    # Only proceed if user typed something
-    if user_input.strip():
-        # 1) Add user message to the chat history
-        st.session_state.chat_history.append(("User", user_input.strip()))
-        # 2) Retrieve context from Pinecone
-        context_text = retrieve_context(user_input.strip())
-        # 3) Call Claude for the response
-        claude_reply = fetch_claude_response(user_input.strip(), context_text)
-        # 4) Append Claude's response to chat history
-        st.session_state.chat_history.append(("Claude", claude_reply))
-
-# -----------------------------------------------------------------------------
-# 9. Render the conversation
-# -----------------------------------------------------------------------------
-st.write("---")
-st.subheader("Conversation History")
-
-for speaker, msg in st.session_state.chat_history:
-    if speaker == "Claude":
-        # If there's a code fence (```), optionally render it as st.code
-        # Otherwise just render as text
-        if "```" in msg:
-            # A simple approach: remove backticks and display
-            # Alternatively, parse code blocks in more detail if needed
-            code_snippet = msg.replace("```", "")
-            st.markdown(f"**{speaker}:**")
-            st.code(code_snippet, language="python")
-        else:
-            st.markdown(f"**{speaker}:** {msg}")
+def main():
+    st.set_page_config(page_title="RAG-Assisted Claude Chat", layout="wide")
+    st.title("RAG-Assisted Claude Chat")
+    st.markdown("A conversational AI powered by RAG-assisted Claude, specialized in boardgame.io")
+    
+    # Add debug mode toggle
+    debug_mode = st.sidebar.checkbox("Enable Debug Mode", value=False)
+    
+    # Configure debug logging
+    if debug_mode:
+        st.write("Debug Mode Enabled")
+        st.write(f"Session State Keys: {list(st.session_state.keys())}")
+        st.write(f"Environment Variables Set: VOYAGE_API_KEY={'VOYAGE_API_KEY' in os.environ}, "
+                f"CLAUDE_API_KEY={'CLAUDE_API_KEY' in os.environ}, "
+                f"PINECONE_API_KEY={'PINECONE_API_KEY' in os.environ}, "
+                f"PINECONE_ENV={'PINECONE_ENV' in os.environ}")
     else:
-        st.markdown(f"**{speaker}:** {msg}")
+        # If debug mode is off, override the debug write statements
+        def debug_write(*args, **kwargs):
+            pass
+        st.write = debug_write
+    
+    init_session_state()
+    
+    # Chat display
+    for speaker, message in st.session_state.chat_history:
+        with st.chat_message(speaker.lower()):
+            if speaker == "Claude":
+                format_message(message)
+            else:
+                st.write(message)
+    
+    # User input
+    if prompt := st.chat_input("Type your message here..."):
+        with st.chat_message("user"):
+            st.write(prompt)
+        st.session_state.chat_history.append(("User", prompt))
+        
+        with st.chat_message("claude"):
+            with st.spinner("Thinking..."):
+                context = retrieve_context(prompt)
+                response = fetch_claude_response(prompt, context)
+                st.session_state.chat_history.append(("Claude", response))
+                format_message(response)
+
+if __name__ == "__main__":
+    main()
