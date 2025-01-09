@@ -68,8 +68,7 @@ if st.button("Send"):
         st.session_state.chat_history.append(("Claude", response))
 
         # Clear user input
-        st.session_state.raw_input = ""
-        st.experimental_rerun()
+        st.session_state.raw_input = ""  # Reset input manually
 
 # Chat display
 for speaker, message in st.session_state.chat_history:
