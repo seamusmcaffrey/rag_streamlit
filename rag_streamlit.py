@@ -31,28 +31,48 @@ def init_clients():
         st.error(f"Error initializing clients: {str(e)}")
         return None, None, None
 
-def format_response(response):
-    """Format the response for display, handling code blocks properly"""
+def clean_response(response):
+    """Clean response text by removing TextBlock artifacts and formatting properly"""
     if isinstance(response, str):
-        if "```" in response:
-            parts = response.split("```")
-            formatted_parts = []
-            for i, part in enumerate(parts):
-                if i % 2 == 0:  # Regular text
-                    if part.strip():
-                        formatted_parts.append(part.strip())
-                else:  # Code block
-                    lines = part.strip().split('\n')
-                    if lines and lines[0] in ['python', 'javascript', 'typescript']:
-                        language = lines[0]
-                        code = '\n'.join(lines[1:])
-                    else:
-                        language = ''
-                        code = part
-                    st.code(code.strip(), language=language)
-            return "\n\n".join(formatted_parts)
+        # Remove TextBlock artifacts
+        if response.startswith('[TextBlock(text="'):
+            response = response[16:-15]  # Remove wrapper
+        if response.startswith('[TextBlock(text='):
+            response = response[15:-14]  # Remove wrapper
+            
+        # Unescape quotes and newlines
+        response = response.replace('\\"', '"').replace('\\n', '\n')
+        
+        # Clean up any remaining artifacts
+        response = response.replace('", type=\'text\')', '')
+        response = response.replace('", type="text")', '')
         return response
     return str(response)
+
+def format_response(response):
+    """Format the response for display, handling code blocks properly"""
+    response = clean_response(response)
+    
+    if "```" in response:
+        parts = response.split("```")
+        for i, part in enumerate(parts):
+            if i % 2 == 0:  # Regular text
+                if part.strip():
+                    st.markdown(part.strip())
+            else:  # Code block
+                # Parse language if specified
+                code_lines = part.strip().split('\n')
+                if code_lines and code_lines[0] in ['python', 'javascript', 'typescript', 'html', 'css', 'json']:
+                    language = code_lines[0]
+                    code = '\n'.join(code_lines[1:])
+                else:
+                    language = ''
+                    code = part
+                
+                # Display code with copy button
+                st.code(code.strip(), language=language)
+    else:
+        st.markdown(response)
 
 @st.cache_data(ttl="1h")
 def get_rag_context(query, _voyage_client, _pinecone_index):
@@ -135,8 +155,9 @@ def main():
                     st.session_state.messages[-10:]  # Keep last 10 messages to manage context window
                 )
                 
-                # Display and store response
-                st.markdown(format_response(response))
+                # Display and store cleaned response
+                response = clean_response(response)
+                format_response(response)
                 st.session_state.messages.append({"role": "assistant", "content": response})
 
 if __name__ == "__main__":
