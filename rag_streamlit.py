@@ -109,7 +109,7 @@ def get_assistant_response(prompt, context, claude_client, message_history):
             model="claude-3-5-sonnet-20241022",
             max_tokens=1000,
             messages=messages,
-            system="You are a helpful AI assistant with expertise in boardgame.io. Engage naturally with users, providing technical details only when specifically asked. Remember to keep track of the conversation context and refer back to previous questions when relevant."
+            system="You are an expert coder specialized in the boardgame.io library with extensive node.js and typescript knowledge. Remember to keep track of the conversation context and refer back to previous discussion when relevant for problem solving."
         )
         return response.content
     except Exception as e:
