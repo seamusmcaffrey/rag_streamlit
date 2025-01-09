@@ -6,32 +6,60 @@ import streamlit as st
 import logging
 from datetime import datetime
 
-# Minimal logging setup - only for errors and critical events
-logging.basicConfig(
-    level=logging.ERROR,
-    format='%(levelname)s: %(message)s',
-    force=True
-)
+# Minimize logging output
+logging.getLogger().setLevel(logging.WARNING)
+for log_name in ['streamlit', 'watchdog.observers.inotify_buffer']:
+    logging.getLogger(log_name).setLevel(logging.WARNING)
 
 @st.cache_resource
 def init_clients():
     """Initialize API clients with error handling"""
     try:
+        # Check for required environment variables
+        required_vars = ["VOYAGE_API_KEY", "CLAUDE_API_KEY", "PINECONE_API_KEY", "PINECONE_ENV"]
+        missing_vars = [var for var in required_vars if not os.getenv(var)]
+        if missing_vars:
+            raise ValueError(f"Missing required environment variables: {', '.join(missing_vars)}")
+        
         claude = Client(api_key=os.getenv("CLAUDE_API_KEY"))
         voyage = voyageai.Client(api_key=os.getenv("VOYAGE_API_KEY"))
         pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"), environment=os.getenv("PINECONE_ENV"))
         index = pc.Index("rag-index")
+        
         return claude, voyage, index
     except Exception as e:
-        st.error(f"Failed to initialize clients: {str(e)}")
+        st.error(f"Error initializing clients: {str(e)}")
         return None, None, None
 
+def format_response(response):
+    """Format the response for display, handling code blocks properly"""
+    if isinstance(response, str):
+        if "```" in response:
+            parts = response.split("```")
+            formatted_parts = []
+            for i, part in enumerate(parts):
+                if i % 2 == 0:  # Regular text
+                    if part.strip():
+                        formatted_parts.append(part.strip())
+                else:  # Code block
+                    lines = part.strip().split('\n')
+                    if lines and lines[0] in ['python', 'javascript', 'typescript']:
+                        language = lines[0]
+                        code = '\n'.join(lines[1:])
+                    else:
+                        language = ''
+                        code = part
+                    st.code(code.strip(), language=language)
+            return "\n\n".join(formatted_parts)
+        return response
+    return str(response)
+
 @st.cache_data(ttl="1h")
-def get_rag_context(query, voyage_client, pinecone_index):
+def get_rag_context(query, _voyage_client, _pinecone_index):
     """Get relevant context from RAG system"""
     try:
-        embedding = voyage_client.embed([query], model="voyage-3", input_type="query").embeddings[0]
-        results = pinecone_index.query(vector=embedding, top_k=3, include_metadata=True)
+        embedding = _voyage_client.embed([query], model="voyage-3", input_type="query").embeddings[0]
+        results = _pinecone_index.query(vector=embedding, top_k=3, include_metadata=True)
         return "\n\n".join([match["metadata"].get("content", "") for match in results["matches"]])
     except Exception as e:
         st.error(f"Error retrieving context: {str(e)}")
@@ -75,7 +103,7 @@ def main():
     # Display chat messages
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
-            st.markdown(message["content"])
+            st.markdown(format_response(message["content"]))
     
     # Chat input
     if prompt := st.chat_input("Ask me anything about boardgame.io..."):
@@ -88,7 +116,7 @@ def main():
             with st.spinner("Thinking..."):
                 context = get_rag_context(prompt, voyage, index)
                 response = get_assistant_response(prompt, context, claude)
-                st.markdown(response)
+                st.markdown(format_response(response))
                 st.session_state.messages.append({"role": "assistant", "content": response})
 
 if __name__ == "__main__":
