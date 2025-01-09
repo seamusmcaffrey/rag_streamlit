@@ -45,30 +45,26 @@ def fetch_claude_response(prompt, context, max_tokens=1000):
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
-if "raw_input" not in st.session_state:
-    st.session_state.raw_input = ""
+# Text input box with submit on "Enter"
+def submit_message():
+    if st.session_state["user_input"].strip():
+        user_message = st.session_state["user_input"].strip()
+        st.session_state.chat_history.append(("You", user_message))
+        st.session_state["user_input"] = ""  # Clear input box
 
-# Input box with submit on "Enter" and "Shift+Enter" for new line
-user_input = st.text_input(
-    "Your Question:",
-    value=st.session_state.raw_input,
-    key="input_text",
-    on_change=lambda: st.session_state.update({"raw_input": st.session_state.input_text.strip()}),
+        # Fetch response and update chat history
+        context = retrieve_context(user_message)
+        response = fetch_claude_response(user_message, context)
+        clean_response = response.replace("[TextBlock(text=", "").replace(", type='text')]", "").strip()
+        st.session_state.chat_history.append(("Claude", clean_response))
+
+# Input field for user messages
+st.text_input(
+    "Type your message here:",
+    key="user_input",
+    on_change=submit_message,  # Submit on "Enter"
+    placeholder="Enter your message and press Enter...",
 )
-
-# Submit button logic
-if st.button("Send"):
-    if user_input.strip():
-        # Retrieve context and fetch response
-        context = retrieve_context(user_input)
-        response = fetch_claude_response(user_input, context)
-
-        # Update chat history
-        st.session_state.chat_history.append(("You", user_input.strip()))
-        st.session_state.chat_history.append(("Claude", response))
-
-        # Clear user input
-        st.session_state.raw_input = ""  # Reset input manually
 
 # Chat display
 for speaker, message in st.session_state.chat_history:
