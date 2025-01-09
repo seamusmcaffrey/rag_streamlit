@@ -6,10 +6,10 @@ from anthropic import Client
 import streamlit as st
 
 # Set your API keys
-VOYAGE_API_KEY = "pa-igkhGLYmF_UOg6yhLHQm9-vMgfVVzWThHPTS-zIko5Q"
-CLAUDE_API_KEY = "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"
-PINECONE_API_KEY = "pcsk_3BYduG_UMor22qkDcB6zFC4ZanvU75m8gdMbevXpiTHQGHpCWi1rcZia8hVV85J8on6n3E"
-PINECONE_ENV = "us-east-1"
+VOYAGE_API_KEY = os.getenv("VOYAGE_API_KEY")
+CLAUDE_API_KEY = os.getenv("CLAUDE_API_KEY")
+PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
+PINECONE_ENV = os.getenv("PINECONE_ENV")
 
 # Initializations
 voyage = voyageai.Client(api_key=VOYAGE_API_KEY)
