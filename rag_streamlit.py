@@ -102,43 +102,131 @@ Please provide a clear and concise response focusing on boardgame.io implementat
         st.error(f"Error getting Claude's response: {str(e)}")
         return "I encountered an error while processing your request."
 
+def clean_code_block(code_block):
+    """Clean a code block by removing escape characters and formatting properly"""
+    # Remove common escape sequences
+    cleaned = code_block.replace('\\n', '\n')
+    cleaned = cleaned.replace('\\t', '    ')
+    cleaned = cleaned.replace('\\"', '"')
+    cleaned = cleaned.replace("\\'", "'")
+    
+    # Remove any leading/trailing whitespace
+    cleaned = cleaned.strip()
+    
+    return cleaned
+
 def format_message(message):
     """Format message for display, handling code blocks"""
-    if "```" in message:
-        parts = message.split("```")
-        formatted_parts = []
-        for i, part in enumerate(parts):
-            if i % 2 == 0:  # Regular text
-                if part.strip():
-                    formatted_parts.append(part)
-            else:  # Code block
-                language = "python" if part.startswith("python\n") else ""
-                code = part.replace("python\n", "") if language else part
-                st.code(code.strip(), language=language)
-        return " ".join(formatted_parts)
-    return message
+    if isinstance(message, str):
+        # First clean any escape characters in the entire message
+        message = clean_code_block(message)
+        
+        if "```" in message:
+            parts = message.split("```")
+            formatted_parts = []
+            for i, part in enumerate(parts):
+                if i % 2 == 0:  # Regular text
+                    if part.strip():
+                        formatted_parts.append(part.strip())
+                else:  # Code block
+                    # Detect language if specified
+                    lines = part.strip().split('\n')
+                    if lines and lines[0] in ['python', 'javascript', 'typescript', 'html', 'css', 'json']:
+                        language = lines[0]
+                        code = '\n'.join(lines[1:])
+                    else:
+                        language = ''
+                        code = part
+                    
+                    # Clean and format the code
+                    code = clean_code_block(code)
+                    st.code(code, language=language)
+            
+            if formatted_parts:
+                return "\n\n".join(formatted_parts)
+            return ""
+        return message
+    return str(message)
 
 def main():
     st.set_page_config(page_title="RAG-Assisted Claude Chat", layout="wide")
     st.title("RAG-Assisted Claude Chat")
     st.markdown("A conversational AI powered by RAG-assisted Claude, specialized in boardgame.io")
     
+    init_session_state()
+    
     # Add debug mode toggle
     debug_mode = st.sidebar.checkbox("Enable Debug Mode", value=False)
     
-    # Configure debug logging
-    if debug_mode:
-        st.write("Debug Mode Enabled")
-        st.write(f"Session State Keys: {list(st.session_state.keys())}")
-        st.write(f"Environment Variables Set: VOYAGE_API_KEY={'VOYAGE_API_KEY' in os.environ}, "
-                f"CLAUDE_API_KEY={'CLAUDE_API_KEY' in os.environ}, "
-                f"PINECONE_API_KEY={'PINECONE_API_KEY' in os.environ}, "
-                f"PINECONE_ENV={'PINECONE_ENV' in os.environ}")
-    else:
-        # If debug mode is off, override the debug write statements
-        def debug_write(*args, **kwargs):
-            pass
-        st.write = debug_write
+    # Display chat history
+    for i, (role, content) in enumerate(st.session_state.chat_history):
+        with st.chat_message(role.lower()):
+            if isinstance(content, str):
+                # Handle code blocks
+                if "```" in content:
+                    parts = content.split("```")
+                    for j, part in enumerate(parts):
+                        if j % 2 == 0:  # Regular text
+                            if part.strip():
+                                st.write(part.strip())
+                        else:  # Code block
+                            # Remove language identifier and leading/trailing whitespace
+                            code = part.strip()
+                            if "\n" in code:
+                                lang = code.split("\n")[0]
+                                code = "\n".join(code.split("\n")[1:])
+                            else:
+                                lang = ""
+                            st.code(code, language=lang if lang else "python")
+                else:
+                    st.write(content)
+            else:
+                st.write(str(content))
+    
+    # Chat input
+    if prompt := st.chat_input("What would you like to know about boardgame.io?"):
+        # Display user message
+        with st.chat_message("user"):
+            st.write(prompt)
+        
+        # Add to chat history
+        st.session_state.chat_history.append(("user", prompt))
+        
+        # Get and display assistant response
+        with st.chat_message("assistant"):
+            with st.spinner("Thinking..."):
+                if debug_mode:
+                    st.write("Debug: Getting context...")
+                context = retrieve_context(prompt)
+                
+                if debug_mode:
+                    st.write("Debug: Getting Claude response...")
+                response = fetch_claude_response(prompt, context)
+                
+                if debug_mode:
+                    st.write(f"Debug: Raw response: {response}")
+                
+                # Add to chat history
+                st.session_state.chat_history.append(("assistant", response))
+                
+                # Display formatted response
+                if "```" in response:
+                    parts = response.split("```")
+                    for j, part in enumerate(parts):
+                        if j % 2 == 0:  # Regular text
+                            if part.strip():
+                                st.write(part.strip())
+                        else:  # Code block
+                            # Remove language identifier and leading/trailing whitespace
+                            code = part.strip()
+                            if "\n" in code:
+                                lang = code.split("\n")[0]
+                                code = "\n".join(code.split("\n")[1:])
+                            else:
+                                lang = ""
+                            st.code(code, language=lang if lang else "python")
+                else:
+                    st.write(response)
     
     init_session_state()
     
