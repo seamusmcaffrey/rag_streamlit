@@ -88,7 +88,7 @@ def fetch_claude_response(user_query, context, max_tokens=1000):
 
         # Send the request to Anthropic
         response = claude.chat.create(
-            model="claude-2",           # or 'claude-instant-1' if needed
+            model="claude-3-5-sonnet-20241022",           # or 'claude-instant-1' if needed
             messages=messages,
             max_tokens_to_sample=max_tokens,
             temperature=0.7,
