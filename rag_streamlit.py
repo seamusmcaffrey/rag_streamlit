@@ -19,6 +19,7 @@ index = pc.Index(INDEX_NAME)
 claude = Client(api_key=CLAUDE_API_KEY)
 
 # Streamlit app setup
+st.set_page_config(page_title="RAG-Assisted Claude Chat", layout="wide")
 st.title("RAG-Assisted Claude Chat")
 st.markdown("A conversational AI powered by RAG-assisted Claude.")
 
@@ -39,21 +40,46 @@ def fetch_claude_response(prompt, context, max_tokens=1000):
             {"role": "user", "content": structured_prompt}
         ]
     )
-    return response.content  # Streamlit automatically handles JSON and string outputs.
+    return response["completion"]  # Extract the completion text
 
 # Main Streamlit app logic
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
-user_input = st.text_input("Your Question:", "")
-if st.button("Send"):
-    if user_input:
+# Input box with submit on "Enter" and "Shift+Enter" for new line
+st.markdown("""
+<style>
+textarea {
+    height: 5em !important;
+    resize: none !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
+user_input = st.text_area(
+    "Type your question below (Shift+Enter for a new line, Enter to submit):",
+    value="",
+    placeholder="Your question here...",
+    on_change=lambda: st.session_state.setdefault("user_submitted", True),
+    key="user_input",
+)
+
+if st.button("Send") or st.session_state.get("user_submitted", False):
+    st.session_state.user_submitted = False
+    if user_input.strip():
         context = retrieve_context(user_input)
         response = fetch_claude_response(user_input, context)
         st.session_state.chat_history.append(("You", user_input))
         st.session_state.chat_history.append(("Claude", response))
-        user_input = ""  # Clear input field
+        st.experimental_rerun()  # Refresh the page to display the updated history
 
-# Display chat history
+# Chat display
 for speaker, message in st.session_state.chat_history:
-    st.markdown(f"**{speaker}:** {message}")
+    if speaker == "Claude" and "```" in message:
+        st.markdown(f"**{speaker}:**")
+        st.code(message.replace("```", ""), language="python")
+    else:
+        st.markdown(f"**{speaker}:** {message}")
+
+# Scroll the chat history to the top
+st.write("")
