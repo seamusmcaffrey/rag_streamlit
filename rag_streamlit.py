@@ -7,24 +7,27 @@ import logging
 import sys
 from datetime import datetime
 
-# Configure logging
-logging.basicConfig(
-    level=logging.DEBUG,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(sys.stdout),
-        logging.FileHandler(f'chatbot_debug_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log')
-    ]
-)
-logger = logging.getLogger(__name__)
+# Configure logging - but only on first run
+if 'logger' not in st.session_state:
+    logging.basicConfig(
+        level=logging.DEBUG,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.StreamHandler(sys.stdout),
+            logging.FileHandler(f'chatbot_debug_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log')
+        ]
+    )
+    st.session_state.logger = logging.getLogger(__name__)
 
-# Initialize API clients
+logger = st.session_state.get('logger', logging.getLogger(__name__))
+
+# Initialize API clients - but only once
+@st.cache_resource
 def init_clients():
     """Initialize API clients with error handling"""
     try:
         logger.info("Initializing API clients...")
         
-        # Check for required environment variables
         required_vars = ["VOYAGE_API_KEY", "CLAUDE_API_KEY", "PINECONE_API_KEY", "PINECONE_ENV"]
         missing_vars = [var for var in required_vars if not os.getenv(var)]
         if missing_vars:
@@ -40,16 +43,10 @@ def init_clients():
     
     except Exception as e:
         logger.error(f"Error initializing clients: {str(e)}")
-        st.error(f"Error initializing clients: {str(e)}")
         return None, None, None
 
-def init_session_state():
-    """Initialize session state variables"""
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
-        logger.info("Initialized empty messages list in session state")
-
-def get_rag_context(voyage_client, pinecone_index, query):
+@st.cache_data(ttl="1h")
+def get_rag_context(query, voyage_client, pinecone_index):
     """Get relevant context from RAG system"""
     try:
         logger.debug(f"Getting RAG context for query: {query}")
@@ -62,11 +59,10 @@ def get_rag_context(voyage_client, pinecone_index, query):
         logger.error(f"Error getting RAG context: {str(e)}")
         return ""
 
-def get_assistant_response(claude_client, prompt, context=""):
+def get_assistant_response(prompt, context, claude_client):
     """Get response from Claude"""
     try:
         logger.debug(f"Getting Claude response for prompt: {prompt}")
-        logger.debug(f"Context length: {len(context)}")
         
         messages = [
             {
@@ -82,7 +78,6 @@ def get_assistant_response(claude_client, prompt, context=""):
             system="You are a helpful AI assistant with expertise in boardgame.io. Engage naturally with users, providing technical details only when specifically asked."
         )
         
-        logger.debug(f"Got response from Claude: {response.content}")
         return response.content
     
     except Exception as e:
@@ -92,7 +87,11 @@ def get_assistant_response(claude_client, prompt, context=""):
 def main():
     st.set_page_config(page_title="RAG-Assisted Claude Chat", layout="wide")
     
-    # Initialize clients
+    # Initialize session state
+    if "messages" not in st.session_state:
+        st.session_state.messages = []
+    
+    # Initialize clients (cached)
     claude, voyage, index = init_clients()
     if not all([claude, voyage, index]):
         st.error("Failed to initialize required clients. Check the logs for details.")
@@ -105,10 +104,7 @@ def main():
     debug_mode = st.sidebar.checkbox("Debug Mode")
     if debug_mode:
         st.sidebar.text("Session State:")
-        st.sidebar.write(st.session_state)
-    
-    # Initialize session state
-    init_session_state()
+        st.sidebar.write(dict(st.session_state))
     
     # Display chat messages
     for message in st.session_state.messages:
@@ -117,9 +113,6 @@ def main():
     
     # Chat input
     if prompt := st.chat_input("Ask me anything about boardgame.io..."):
-        # Log the received prompt
-        logger.info(f"Received prompt: {prompt}")
-        
         # Add user message to chat
         st.chat_message("user").markdown(prompt)
         st.session_state.messages.append({"role": "user", "content": prompt})
@@ -127,11 +120,11 @@ def main():
         # Get assistant response
         with st.chat_message("assistant"):
             with st.spinner("Thinking..."):
-                # Get RAG context if relevant
-                context = get_rag_context(voyage, index, prompt)
+                # Get RAG context if relevant (cached)
+                context = get_rag_context(prompt, voyage, index)
                 
                 # Get Claude's response
-                response = get_assistant_response(claude, prompt, context)
+                response = get_assistant_response(prompt, context, claude)
                 
                 # Display response
                 st.markdown(response)
