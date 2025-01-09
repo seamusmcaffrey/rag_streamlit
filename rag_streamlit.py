@@ -59,22 +59,15 @@ textarea {
 </style>
 """, unsafe_allow_html=True)
 
-user_input = st.text_area(
-    "Type your question below (Shift+Enter for a new line, Enter to submit):",
-    value="",
-    placeholder="Your question here...",
-    on_change=lambda: st.session_state.setdefault("user_submitted", True),
-    key="user_input",
-)
+user_input = st.text_input("Your Question:", "", key="input_text", on_change=lambda: st.session_state.chat_history.append(("You", st.session_state.input_text.strip())))
 
-if st.button("Send") or st.session_state.get("user_submitted", False):
-    st.session_state.user_submitted = False
-    if user_input.strip():
+
+if st.button("Send"):
+    if user_input:
         context = retrieve_context(user_input)
         response = fetch_claude_response(user_input, context)
-        st.session_state.chat_history.append(("You", user_input))
         st.session_state.chat_history.append(("Claude", response))
-        st.experimental_rerun()  # Refresh the page to display the updated history
+        st.session_state.input_text = ""  # Clear input field
 
 # Chat display
 for speaker, message in st.session_state.chat_history:
