@@ -34,8 +34,8 @@ def fetch_claude_response(prompt, context, max_tokens=1000):
     response = claude.messages.create(
         model="claude-3-5-sonnet-20241022",
         max_tokens=max_tokens,
+        system="You are an expert coder specialized in the boardgame.io library",  # Set the system prompt here
         messages=[
-            {"role": "system", "content": "You are a helpful assistant."},
             {"role": "user", "content": structured_prompt}
         ]
     )
